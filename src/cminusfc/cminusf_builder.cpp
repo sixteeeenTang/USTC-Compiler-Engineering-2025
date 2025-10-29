@@ -475,21 +475,32 @@ Value* CminusfBuilder::visit(ASTTerm &node) {
 }
 
 Value* CminusfBuilder::visit(ASTCall &node) {
-    auto *func = dynamic_cast<Function *>(scope.find(node.id));
+    auto *func = scope.find(node.id);
+    if (func == nullptr) {
+        return nullptr;
+    }
+
+    auto* funcType = static_cast<Function *>(func)->get_function_type();
     std::vector<Value *> args;
-    auto param_type = func->get_function_type()->param_begin();
+    auto param_type = funcType->param_begin();
+
     for (auto &arg : node.args) {
         auto *arg_val = arg->accept(*this);
-        if (!arg_val->get_type()->is_pointer_type() &&
-            *param_type != arg_val->get_type()) {
-            if (arg_val->get_type()->is_integer_type()) {
-                arg_val = builder->create_sitofp(arg_val, FLOAT_T);
-            } else {
-                arg_val = builder->create_fptosi(arg_val, INT32_T);
+        if (param_type != funcType->param_end()) {
+            if (!arg_val->get_type()->is_pointer_type() && 
+                *param_type != arg_val->get_type()) {
+                // Do type conversion if needed
+                if ((*param_type)->is_integer_type() && 
+                    arg_val->get_type()->is_float_type()) {
+                    arg_val = builder->create_fptosi(arg_val, INT32_T);
+                } else if ((*param_type)->is_float_type() && 
+                         arg_val->get_type()->is_integer_type()) {
+                    arg_val = builder->create_sitofp(arg_val, FLOAT_T);
+                }
             }
+            param_type++;
         }
         args.push_back(arg_val);
-        param_type++;
     }
 
     return builder->create_call(static_cast<Function *>(func), args);
