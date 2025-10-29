@@ -162,10 +162,13 @@ Value* CminusfBuilder::visit(ASTCompoundStmt &node) {
     // 2. 依次处理局部变量声明
     // 3. 依次处理语句列表
     // 4. 处理控制流（遇到终止指令时停止执行后续语句）
-    if (!context.pre_enter_scope)
+    bool did_enter = false;
+    if (!context.pre_enter_scope) {
         scope.enter();
-    else
+        did_enter = true;
+    } else {
         context.pre_enter_scope = false;
+    }
 
     for (auto &decl : node.local_declarations) {
         decl->accept(*this);
@@ -177,7 +180,8 @@ Value* CminusfBuilder::visit(ASTCompoundStmt &node) {
             break;
     }
 
-    scope.exit();
+    if (did_enter)
+        scope.exit();
     return nullptr;
 }
 

@@ -25,7 +25,21 @@ class Scope {
     // return true if successful
     // return false if this name already exits
     bool push(const std::string& name, Value *val) {
+        // Debug: record pushed keys to help diagnose memory-corruption issues
+        // We push the name into debug_keys before inserting into the map so
+        // we have a simple, separately-managed record that won't be
+        // corrupted if the std::map internal structures are damaged.
+        try {
+            debug_keys.push_back(name);
+            std::cerr << "[Scope::push] debug_keys.size=" << debug_keys.size()
+                      << ", last='" << debug_keys.back() << "'\n";
+        } catch (...) {
+            // non-fatal: don't let logging interfere with compilation
+        }
         auto result = inner[inner.size() - 1].insert({name, val});
+        if (!result.second) {
+            std::cerr << "[Scope::push] warning: name '" << name << "' already exists in current scope\n";
+        }
         return result.second;
     }
 
@@ -45,6 +59,8 @@ class Scope {
 
   private:
     std::vector<std::map<std::string, Value *>> inner;
+    // debug-only: keep a flat list of pushed keys (copied) for diagnostics
+    std::vector<std::string> debug_keys;
 };
 
 class CminusfBuilder : public ASTVisitor {
@@ -74,11 +90,15 @@ class CminusfBuilder : public ASTVisitor {
         auto *neg_idx_except_fun = Function::create(
             neg_idx_except_type, "neg_idx_except", module.get());
 
-        scope.enter();
-        scope.push("input", input_fun);
-        scope.push("output", output_fun);
-        scope.push("outputFloat", output_float_fun);
-        scope.push("neg_idx_except", neg_idx_except_fun);
+    scope.enter();
+    scope.push("input", input_fun);
+    std::cerr << "[CminusfBuilder] pushed builtin: input\n";
+    scope.push("output", output_fun);
+    std::cerr << "[CminusfBuilder] pushed builtin: output\n";
+    scope.push("outputFloat", output_float_fun);
+    std::cerr << "[CminusfBuilder] pushed builtin: outputFloat\n";
+    scope.push("neg_idx_except", neg_idx_except_fun);
+    std::cerr << "[CminusfBuilder] pushed builtin: neg_idx_except\n";
     }
 
     std::unique_ptr<Module> getModule() { return std::move(module); }
