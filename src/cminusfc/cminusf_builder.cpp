@@ -480,25 +480,42 @@ Value* CminusfBuilder::visit(ASTCall &node) {
         return nullptr;
     }
 
-    auto* funcType = static_cast<Function *>(func)->get_function_type();
+    auto *funcType = static_cast<Function *>(func)->get_function_type();
     std::vector<Value *> args;
-    auto param_type = funcType->param_begin();
 
-    for (auto &arg : node.args) {
-        auto *arg_val = arg->accept(*this);
-        if (param_type != funcType->param_end()) {
-            if (!arg_val->get_type()->is_pointer_type() && 
-                *param_type != arg_val->get_type()) {
-                // Do type conversion if needed
-                if ((*param_type)->is_integer_type() && 
-                    arg_val->get_type()->is_float_type()) {
-                    arg_val = builder->create_fptosi(arg_val, INT32_T);
-                } else if ((*param_type)->is_float_type() && 
-                         arg_val->get_type()->is_integer_type()) {
-                    arg_val = builder->create_sitofp(arg_val, FLOAT_T);
+    // Handle arguments
+    for (size_t i = 0; i < node.args.size(); i++) {
+        auto *arg_val = node.args[i]->accept(*this);
+        
+        // For built-in functions, handle type conversion
+        if (node.id == "input") {
+            // input() takes no arguments
+            continue;
+        } else if (node.id == "output") {
+            // output() expects an integer
+            if (arg_val->get_type()->is_float_type()) {
+                arg_val = builder->create_fptosi(arg_val, INT32_T);
+            }
+        } else if (node.id == "outputFloat") {
+            // outputFloat() expects a float
+            if (arg_val->get_type()->is_integer_type()) {
+                arg_val = builder->create_sitofp(arg_val, FLOAT_T);
+            }
+        } else {
+            // For user-defined functions, do general type conversion
+            if (i < funcType->get_num_of_args()) {
+                auto param_type = funcType->get_param_type(i);
+                if (!arg_val->get_type()->is_pointer_type() && 
+                    param_type != arg_val->get_type()) {
+                    if (param_type->is_integer_type() && 
+                        arg_val->get_type()->is_float_type()) {
+                        arg_val = builder->create_fptosi(arg_val, INT32_T);
+                    } else if (param_type->is_float_type() && 
+                             arg_val->get_type()->is_integer_type()) {
+                        arg_val = builder->create_sitofp(arg_val, FLOAT_T);
+                    }
                 }
             }
-            param_type++;
         }
         args.push_back(arg_val);
     }
