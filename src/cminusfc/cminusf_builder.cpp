@@ -161,7 +161,7 @@ Value* CminusfBuilder::visit(ASTCompoundStmt &node) {
 
     for (auto &stmt : node.statement_list) {
         stmt->accept(*this);
-        if (builder->get_insert_block()->get_terminator() != nullptr)
+        if (builder->get_insert_block()->is_terminated())
             break;
     }
 
@@ -239,7 +239,7 @@ Value* CminusfBuilder::visit(ASTIterationStmt &node) {
 
     builder->set_insert_point(loopBB);
     node.statement->accept(*this);
-    if (builder->get_insert_block()->get_terminator() == nullptr) {
+    if (!builder->get_insert_block()->is_terminated()) {
         builder->create_br(condBB);
     }
 
@@ -414,6 +414,10 @@ Value* CminusfBuilder::visit(ASTSimpleExpression &node) {
         default:
             break;
     }
+    // Comparison instructions produce i1; C semantics expect int (i32)
+    if (ret_val && ret_val->get_type()->is_int1_type()) {
+        ret_val = builder->create_zext(ret_val, INT32_T);
+    }
     return ret_val;
 }
 
@@ -485,7 +489,19 @@ Value* CminusfBuilder::visit(ASTCall &node) {
 
     // Handle arguments
     for (size_t i = 0; i < node.args.size(); i++) {
+        // If parameter expects a pointer (e.g., array param), request lvalue
+        bool need_lvalue = false;
+        if (node.id != "input" && node.id != "output" && node.id != "outputFloat") {
+            if (i < funcType->get_num_of_args()) {
+                if (funcType->get_param_type(i)->is_pointer_type())
+                    need_lvalue = true;
+            }
+        }
+        bool original_require = context.require_lvalue;
+        if (need_lvalue)
+            context.require_lvalue = true;
         auto *arg_val = node.args[i]->accept(*this);
+        context.require_lvalue = original_require;
         
         // For built-in functions, handle type conversion
         if (node.id == "input") {
