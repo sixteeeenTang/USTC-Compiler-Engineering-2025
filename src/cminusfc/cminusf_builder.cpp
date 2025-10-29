@@ -342,6 +342,12 @@ Value* CminusfBuilder::visit(ASTVar &node) {
             // If the variable is an array, return a pointer to the first element
             // (i.e. convert array type to element pointer) so it matches
             // function parameter of pointer type (int* / float*).
+            if (alloctype->is_pointer_type()) {
+                // For a parameter that is itself a pointer (e.g. an array parameter
+                // represented by an alloca of pointer type), load the pointer value
+                // so the callee receives i32* (not i32**).
+                return builder->create_load(baseAddr);
+            }
             if (alloctype->is_array_type()) {
                 return builder->create_gep(baseAddr, {CONST_INT(0), CONST_INT(0)});
             }
