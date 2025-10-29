@@ -339,15 +339,19 @@ Value* CminusfBuilder::visit(ASTVar &node) {
     } else {
         if (context.require_lvalue) {
             context.require_lvalue = false;
+            // If the variable is an array, return a pointer to the first element
+            // (i.e. convert array type to element pointer) so it matches
+            // function parameter of pointer type (int* / float*).
+            if (alloctype->is_array_type()) {
+                return builder->create_gep(baseAddr, {CONST_INT(0), CONST_INT(0)});
+            }
             return baseAddr;
-            // return builder->create_gep(baseAddr, {CONST_INT(0)});
         } else {
-            if(alloctype->is_array_type()){
-                return builder->create_gep(baseAddr, {CONST_INT(0),CONST_INT(0)});
+            if (alloctype->is_array_type()) {
+                return builder->create_gep(baseAddr, {CONST_INT(0), CONST_INT(0)});
             } else {
                 return builder->create_load(baseAddr);
             }
-            
         }
     }
     return nullptr;
