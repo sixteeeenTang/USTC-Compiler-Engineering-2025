@@ -141,7 +141,19 @@ Value* CminusfBuilder::visit(ASTFunDeclaration &node) {
 }
 
 Value* CminusfBuilder::visit(ASTParam &node) {
-    return nullptr;
+    // Create an alloca for the parameter so that the function body
+    // can store the incoming argument value into it.
+    Type *ty = nullptr;
+    if (node.type == TYPE_INT) {
+        ty = node.isarray ? INT32PTR_T : INT32_T;
+    } else if (node.type == TYPE_FLOAT) {
+        ty = node.isarray ? FLOATPTR_T : FLOAT_T;
+    } else {
+        ty = VOID_T;
+    }
+
+    auto *alloca = builder->create_alloca(ty);
+    return alloca;
 }
 
 Value* CminusfBuilder::visit(ASTCompoundStmt &node) {
