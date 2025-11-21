@@ -39,12 +39,39 @@ bool DeadCode::clear_basic_blocks(Function *func) {
 }
 
 void DeadCode::mark(Function *func) {
-    // TODO
+    // 初始化work_list，加入所有critical指令
+    work_list.clear();
+    marked.clear();
     
+    for (auto &bb : func->get_basic_blocks()) {
+        for (auto &inst : bb.get_instructions()) {
+            if (is_critical(&inst)) {
+                work_list.push_back(&inst);
+                marked[&inst] = true;
+            }
+        }
+    }
+    
+    // Work list算法，处理所有标记为true的指令的操作数
+    while (!work_list.empty()) {
+        auto inst = work_list.front();
+        work_list.pop_front();
+        
+        // 标记该指令的所有操作数（如果是指令的话）
+        for (auto op : inst->get_operands()) {
+            if (auto op_inst = dynamic_cast<Instruction *>(op)) {
+                if (marked.find(op_inst) == marked.end() || !marked[op_inst]) {
+                    marked[op_inst] = true;
+                    work_list.push_back(op_inst);
+                }
+            }
+        }
+    }
 }
 
 void DeadCode::mark(Instruction *ins) {
-    // TODO
+    // 这个函数可以用来单独标记一个指令，但目前在主算法中未使用
+    // 保留为空实现
 }
 
 bool DeadCode::sweep(Function *func) {
@@ -58,22 +85,58 @@ bool DeadCode::sweep(Function *func) {
     std::unordered_set<Instruction *> wait_del{};
 
     // 1. 收集所有未被标记的指令
- 
+    for (auto &bb : func->get_basic_blocks()) {
+        for (auto &inst : bb.get_instructions()) {
+            if (marked.find(&inst) == marked.end() || !marked[&inst]) {
+                wait_del.insert(&inst);
+            }
+        }
+    }
 
     // 2. 执行删除
-  
+    for (auto inst : wait_del) {
+        // 先从基本块中删除指令
+        inst->get_parent()->erase_instr(inst);
+        
+        // 不要delete，让系统管理内存
+        // delete inst;
+        ins_count++;
+    }
     
     return not wait_del.empty(); // changed
 }
 
 bool DeadCode::is_critical(Instruction *ins) {
-    // TODO: 判断指令是否是无用指令
-    // 提示：
-    // 1. 如果是函数调用，且函数是纯函数，则无用
-    // 2. 如果是无用的分支指令，则无用
-    // 3. 如果是无用的返回指令，则无用
-    // 4. 如果是无用的存储指令，则无用
+    // 终止指令是critical的
+    if (ins->isTerminator()) {
+        return true;
+    }
     
+    // 存储指令是critical的
+    if (ins->is_store()) {
+        return true;
+    }
+    
+    // 有返回值的调用指令中，只有纯函数调用可以被删除
+    if (ins->is_call()) {
+        auto call_inst = dynamic_cast<CallInst *>(ins);
+        if (call_inst && call_inst->func_) {
+            if (func_info->is_pure_function(call_inst->func_)) {
+                // 纯函数调用且返回值无用可以删除
+                return false;
+            }
+        }
+        // 非纯函数调用是critical的
+        return true;
+    }
+    
+    // 如果指令有使用，则是critical的
+    if (!ins->get_use_list().empty()) {
+        return true;
+    }
+    
+    // 其他情况不是critical的
+    return false;
 }
 
 void DeadCode::sweep_globally() {
