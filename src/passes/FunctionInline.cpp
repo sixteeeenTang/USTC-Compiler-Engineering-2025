@@ -61,52 +61,67 @@ void FunctionInline::inline_function(Instruction *call, Function *origin) {
     std::map<Value *, Value *> v_map;
     std::vector<BasicBlock *> bb_list;
     std::vector<Instruction *> ret_list; // 记录函数所有出口
+    
+    // 创建参数映射：函数参数 -> 调用时的实际参数
     for (auto &arg : origin->get_args()) {
         v_map.insert(std::make_pair(static_cast<Value *>(&arg),
                                     call->get_operand(arg.get_arg_no() + 1)));
     }
+    
     auto call_bb = call->get_parent();
     auto call_func = call_bb->get_parent();
-    std::vector<BasicBlock *> ret_void_bbs;
+    
+    // 步骤1: 克隆被内联函数的所有基本块
     for (auto &bb : origin->get_basic_blocks()) {
-        auto bb_new =
-            BasicBlock::create(call_func->get_parent(), "", call_func);
+        auto bb_new = BasicBlock::create(call_func->get_parent(), "", call_func);
         v_map.insert(std::make_pair(static_cast<Value *>(&bb),
                                     static_cast<Value *>(bb_new)));
         bb_list.push_back(bb_new);
+        
         for (auto &inst : bb.get_instructions()) {
-            if (inst.is_ret() && origin->get_return_type()->is_void_type()) {
-                ret_void_bbs.push_back(bb_new);
+            // 跳过返回语句，在后续处理
+            if (inst.is_ret()) {
                 continue;
             }
+            
+            // 跳过PHI指令，在后续处理
             if (inst.is_phi()) {
-                ;
+                continue;
             }
             
-            Instruction *inst_new ;
+            // 克隆指令
+            Instruction *inst_new;
             if (inst.is_call()) {
-                auto call = static_cast<CallInst *>(&inst);
-                auto func = static_cast<Function *>(call->get_operand(0));
-                // 
-                inst_new = new CallInst(func, {call->get_operands().begin() + 1, call->get_operands().end()}, bb_new);
+                auto call_inst = static_cast<CallInst *>(&inst);
+                auto func = static_cast<Function *>(call_inst->get_operand(0));
+                // 创建新的调用指令，跳过第一个操作数（函数指针）
+                inst_new = new CallInst(func, {call_inst->get_operands().begin() + 1, call_inst->get_operands().end()}, bb_new);
+            } else {
+                inst_new = inst.clone(bb_new);
             }
-            else inst_new = inst.clone(bb_new);
-            // 
-            if (inst.is_phi())
-                bb_new->add_instr_begin(inst_new);
+            
+            // 记录指令映射关系
             v_map.insert(std::make_pair(static_cast<Value *>(&inst),
                                         static_cast<Value *>(inst_new)));
+        }
+    }
+    
+    // 步骤2: 处理返回指令并记录映射
+    for (auto &bb : origin->get_basic_blocks()) {
+        for (auto &inst : bb.get_instructions()) {
             if (inst.is_ret()) {
-                ret_list.push_back(inst_new);
+                auto ret_clone = inst.clone(static_cast<BasicBlock *>(v_map[static_cast<Value *>(&bb)]));
+                ret_list.push_back(ret_clone);
+                v_map.insert(std::make_pair(static_cast<Value *>(&inst),
+                                            static_cast<Value *>(ret_clone)));
             }
         }
     }
+    
+    // 步骤3: 更新操作数映射
     for (auto bb : bb_list) {
         for (auto &inst : bb->get_instructions()) {
             for (int i = 0; i < inst.get_num_operand(); i++) {
-                if (inst.is_phi()) {
-                    ;
-                }
                 auto op = inst.get_operand(i);
                 if (v_map.find(op) != v_map.end()) {
                     inst.set_operand(i, v_map[op]);
@@ -114,91 +129,81 @@ void FunctionInline::inline_function(Instruction *call, Function *origin) {
             }
         }
     }
-    Value *ret_val = nullptr; // 返回值
-    bool is_terminated = false;
-    auto bb_new = BasicBlock::create(call_func->get_parent(), "", call_func);
+    
+    // 步骤4: 创建合并基本块，用于汇聚返回路径
+    Value *ret_val = nullptr;
+    BasicBlock *bb_merge = BasicBlock::create(call_func->get_parent(), "", call_func);
+    
     if (!origin->get_return_type()->is_void_type()) {
-        // 
         if (ret_list.size() == 1) {
+            // 单个返回值：直接使用返回值
             auto ret = ret_list.front();
             ret_val = ret->get_operand(0);
             auto ret_bb = ret->get_parent();
             ret_bb->remove_instr(ret);
-            BranchInst::create_br(bb_new, ret_bb);
-        } else {
-            // TODO: 处理多个返回值的情况
-            // 提示：
-            // 1. 需要创建一个新的基本块(bb_phi)用于存放phi指令
-            // 2. 对于每个返回指令：
-            //    - 记录其所在的基本块
-            //    - 移除返回指令
-            //    - 添加跳转到bb_phi的分支指令
-            // 3. 创建phi指令：
-            //    - 设置正确的返回类型
-            //    - 为每个返回路径添加phi对
-            // 4. 将phi指令添加到bb_phi
-            // 5. 设置返回值
-            // 6. 将bb_phi添加到基本块列表
-            // 7. 添加从bb_phi到bb_new的跳转
+            BranchInst::create_br(bb_merge, ret_bb);
+        } else if (ret_list.size() > 1) {
+            // 多个返回值：创建PHI指令进行合并
+            auto phi = PhiInst::create_phi(origin->get_return_type(), bb_merge);
+            bb_merge->add_instr_begin(phi);  // 添加PHI指令到块的开头
+            for (auto ret : ret_list) {
+                auto ret_val_i = ret->get_operand(0);
+                auto ret_bb = ret->get_parent();
+                ret_bb->remove_instr(ret);
+                phi->add_phi_pair_operand(ret_val_i, ret_bb);
+                BranchInst::create_br(bb_merge, ret_bb);
+            }
+            ret_val = phi;
         }
     } else {
-        assert(ret_void_bbs.size() > 0);
-        for (auto bb : ret_void_bbs) {
-            BranchInst::create_br(bb_new, bb);
+        // void返回类型：直接跳转到合并块
+        for (auto ret : ret_list) {
+            auto ret_bb = ret->get_parent();
+            ret_bb->remove_instr(ret);
+            BranchInst::create_br(bb_merge, ret_bb);
         }
     }
-    std::vector<Instruction *> del_list;
-    // 
-    // 
-    BranchInst* br = nullptr;
-    for (auto &inst : call_bb->get_instructions()) {
-    // 
-        if (!is_terminated) {
-            // 如果前一个基本块还没遇到这条跳转指令
-            if (&(inst) == call) {
-                
-                
-                br = BranchInst::create_br(bb_list.front(), call_bb);
-                // bb_1->add_instruction(br);
-                // call_bb->insert_before(&inst, br);
-                // inst.replace_all_use_with(br);
-                if (!origin->get_return_type()->is_void_type()) {
-                    // 
-                    // auto temp = call->get_use_list().begin();
-                    call->replace_all_use_with(ret_val);
-                    // 
-                    // 
-
-                }
-                // call_bb->remove_instr(call);
-                // del_list.push_back(call);
-                is_terminated = true;
-            }
-        } else {
-            // call_bb->remove_instr(&inst);
-            if(dynamic_cast<BranchInst*>(&inst) == br){
-                continue;
-            }
-            del_list.push_back(&inst);
-        }
-    }
-    // 
-    call_bb->remove_instr(call);
-    origin->remove_use(call, 0);
-    // 
-    for (auto inst : del_list) {
-        
-        call_bb->remove_instr(inst);
-        bb_new->add_instruction(inst);
-        inst->set_parent(bb_new);
-    }
-
-    // 
-    // br->set_parent(call_bb);
-    // 
-    origin->reset_bbs();
-    // 
-    call_func->reset_bbs();
     
-    return;
+    // 步骤5: 处理调用指令所在的基本块
+    // 收集call指令之前的所有指令和之后的所有指令
+    std::vector<Instruction *> instructions_before_call;
+    std::vector<Instruction *> instructions_after_call;
+    bool found_call = false;
+    
+    for (auto &inst : call_bb->get_instructions()) {
+        if (&inst == call) {
+            found_call = true;
+            continue;
+        }
+        if (!found_call) {
+            instructions_before_call.push_back(&inst);
+        } else {
+            instructions_after_call.push_back(&inst);
+        }
+    }
+    
+    // 替换call的所有使用
+    if (!origin->get_return_type()->is_void_type()) {
+        call->replace_all_use_with(ret_val);
+    }
+    
+    // 移除call指令及其之后的所有指令
+    call_bb->remove_instr(call);
+    for (auto inst : instructions_after_call) {
+        call_bb->remove_instr(inst);
+    }
+    
+    // 添加跳转到第一个inlined块（如果call_bb还没有被终止）
+    if (!call_bb->is_terminated()) {
+        BranchInst::create_br(bb_list.front(), call_bb);
+    }
+    
+    // 将call之后的指令移到合并块
+    for (auto inst : instructions_after_call) {
+        bb_merge->add_instruction(inst);
+        inst->set_parent(bb_merge);
+    }
+    
+    origin->reset_bbs();
+    call_func->reset_bbs();
 }
