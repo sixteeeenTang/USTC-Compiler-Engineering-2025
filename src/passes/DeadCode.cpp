@@ -60,7 +60,8 @@ void DeadCode::mark(Function *func) {
         // 标记该指令的所有操作数（如果是指令的话）
         for (auto op : inst->get_operands()) {
             if (auto op_inst = dynamic_cast<Instruction *>(op)) {
-                if (marked.find(op_inst) == marked.end() || !marked[op_inst]) {
+                auto it = marked.find(op_inst);
+                if (it == marked.end() || !it->second) {
                     marked[op_inst] = true;
                     work_list.push_back(op_inst);
                 }
@@ -87,7 +88,9 @@ bool DeadCode::sweep(Function *func) {
     // 1. 收集所有未被标记的指令
     for (auto &bb : func->get_basic_blocks()) {
         for (auto &inst : bb.get_instructions()) {
-            if (marked.find(&inst) == marked.end() || !marked[&inst]) {
+            auto it = marked.find(&inst);
+            // 如果在marked中找不到，或者找到了但值为false，则标记为待删除
+            if (it == marked.end() || !it->second) {
                 wait_del.insert(&inst);
             }
         }
@@ -121,7 +124,16 @@ bool DeadCode::is_critical(Instruction *ins) {
     if (ins->is_call()) {
         auto call_inst = dynamic_cast<CallInst *>(ins);
         if (call_inst && call_inst->func_) {
-            if (func_info->is_pure_function(call_inst->func_)) {
+            // 检查函数是否有效且在module中
+            bool func_found = false;
+            for (auto &f : m_->get_functions()) {
+                if (&f == call_inst->func_) {
+                    func_found = true;
+                    break;
+                }
+            }
+            
+            if (func_found && func_info->is_pure_function(call_inst->func_)) {
                 // 纯函数调用且返回值无用可以删除
                 return false;
             }
