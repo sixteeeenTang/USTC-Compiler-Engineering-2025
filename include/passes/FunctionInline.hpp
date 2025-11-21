@@ -2,8 +2,10 @@
 
 #include "PassManager.hpp"
 
+#include <set>
+#include <string>
 
-class FunctionInline : public Pass{
+class FunctionInline : public Pass {
 public:
     FunctionInline(Module *m) : Pass(m) {}
 

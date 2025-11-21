@@ -123,7 +123,7 @@ FCmpInst *FCmpInst::create_fne(Value *v1, Value *v2, BasicBlock *bb) {
 }
 
 CallInst::CallInst(Function *func, std::vector<Value *> args, BasicBlock *bb)
-    : BaseInst<CallInst>(func->get_return_type(), call, bb) {
+    : BaseInst<CallInst>(func->get_return_type(), call, bb), func_(func) {
     assert(func->get_type()->is_function_type() && "Not a function");
     assert((func->get_num_of_args() == args.size()) && "Wrong number of args");
     add_operand(func);
