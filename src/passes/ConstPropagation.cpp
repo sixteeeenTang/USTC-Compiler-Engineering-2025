@@ -60,24 +60,6 @@ ConstantFP *ConstFolder::compute(Instruction::OpID op, ConstantFP *value1, Const
     case Instruction::fdiv:
         return ConstantFP::get(c_value1 / c_value2, module_);
         break;
-    case Instruction::feq:
-        return ConstantFP::get(c_value1 == c_value2, module_);
-        break;
-    case Instruction::fne:
-        return ConstantFP::get(c_value1 != c_value2, module_);
-        break;
-    case Instruction::fgt:
-        return ConstantFP::get(c_value1 > c_value2, module_);
-        break;
-    case Instruction::fge:
-        return ConstantFP::get(c_value1 >= c_value2, module_);
-        break;
-    case Instruction::flt:
-        return ConstantFP::get(c_value1 < c_value2, module_);
-        break;
-    case Instruction::fle:
-        return ConstantFP::get(c_value1 <= c_value2, module_);
-        break;
     default:
         return nullptr;
         break;
@@ -143,9 +125,81 @@ void ConstPropagation::run() {
                         instr.replace_all_use_with(fold_const);
                         wait_delete.push_back(&instr);
                     }
-                }
+                } 
                 // TODO: fold other type of expression
-                throw std::runtime_error("Lab2: 你有一个TODO需要完成！");
+                // 处理浮点数操作
+                else if (instr.is_fadd() || instr.is_fsub() || instr.is_fmul() || instr.is_fdiv()) {
+                    auto value1 = cast_constantfp(instr.get_operand(0));
+                    auto value2 = cast_constantfp(instr.get_operand(1));
+                    if (value1 && value2) {
+                        auto fold_const = folder->compute(instr.get_instr_type(), value1, value2);
+                        instr.replace_all_use_with(fold_const);
+                        wait_delete.push_back(&instr);
+                    }
+                }
+                // 处理整数比较操作
+                else if (instr.is_cmp()) {
+                    auto value1 = cast_constantint(instr.get_operand(0));
+                    auto value2 = cast_constantint(instr.get_operand(1));
+                    if (value1 && value2) {
+                        auto fold_const = folder->compute(instr.get_instr_type(), value1, value2);
+                        instr.replace_all_use_with(fold_const);
+                        wait_delete.push_back(&instr);
+                    }
+                }
+                // 处理浮点比较 - 这些应该返回i1类型的常数
+                else if (instr.is_fcmp()) {
+                    auto value1 = cast_constantfp(instr.get_operand(0));
+                    auto value2 = cast_constantfp(instr.get_operand(1));
+                    if (value1 && value2) {
+                        // 浮点比较的结果是布尔值，需要创建ConstantInt
+                        float c_value1 = value1->get_value();
+                        float c_value2 = value2->get_value();
+                        bool result = false;
+                        switch (instr.get_instr_type()) {
+                        case Instruction::feq:
+                            result = c_value1 == c_value2;
+                            break;
+                        case Instruction::fne:
+                            result = c_value1 != c_value2;
+                            break;
+                        case Instruction::fgt:
+                            result = c_value1 > c_value2;
+                            break;
+                        case Instruction::fge:
+                            result = c_value1 >= c_value2;
+                            break;
+                        case Instruction::flt:
+                            result = c_value1 < c_value2;
+                            break;
+                        case Instruction::fle:
+                            result = c_value1 <= c_value2;
+                            break;
+                        default:
+                            break;
+                        }
+                        auto fold_const = ConstantInt::get(result, m_);
+                        instr.replace_all_use_with(fold_const);
+                        wait_delete.push_back(&instr);
+                    }
+                }
+                // 处理类型转换
+                else if (instr.is_si2fp()) {
+                    auto value1 = cast_constantint(instr.get_operand(0));
+                    if (value1) {
+                        auto fold_const = folder->compute(instr.get_instr_type(), value1);
+                        instr.replace_all_use_with(fold_const);
+                        wait_delete.push_back(&instr);
+                    }
+                }
+                else if (instr.is_fp2si()) {
+                    auto value1 = cast_constantfp(instr.get_operand(0));
+                    if (value1) {
+                        auto fold_const = folder->compute(instr.get_instr_type(), value1);
+                        instr.replace_all_use_with(fold_const);
+                        wait_delete.push_back(&instr);
+                    }
+                }
             }
             globalvar_def.clear();
             for (auto instr : wait_delete) {
@@ -158,7 +212,27 @@ void ConstPropagation::run() {
         for (auto &bb : func.get_basic_blocks()) {
             builder->set_insert_point(&bb);
             // TODO: check if conditional branch's condition is constant
-            throw std::runtime_error("Lab2: 你有一个TODO需要完成！");
+            // 检查分支指令的条件是否为常数
+            for (auto &instr : bb.get_instructions()) {
+                if (instr.is_br()) {
+                    auto br_inst = dynamic_cast<BranchInst *>(&instr);
+                    if (br_inst && br_inst->is_cond_br()) {
+                        auto cond = br_inst->get_condition();
+                        if (auto const_val = cast_constantint(cond)) {
+                            // 如果条件是常数，则只跳转到一个分支
+                            auto true_bb = br_inst->get_operand(1);
+                            auto false_bb = br_inst->get_operand(2);
+                            if (const_val->get_value() != 0) {
+                                // 跳转到true分支，标记false分支为删除
+                                delete_bb.push_back(dynamic_cast<BasicBlock *>(false_bb));
+                            } else {
+                                // 跳转到false分支，标记true分支为删除
+                                delete_bb.push_back(dynamic_cast<BasicBlock *>(true_bb));
+                            }
+                        }
+                    }
+                }
+            }
         }
         for (auto bb : delete_bb) {
             clear_blocks_recs(bb);
@@ -169,8 +243,15 @@ void ConstPropagation::run() {
 
 bool ConstPropagation::is_entry(BasicBlock *bb) {
     // TODO
-    throw std::runtime_error("Lab2: 你有一个TODO需要完成！");
-    return false;
+    // 检查一个基本块是否是函数的入口块
+    if (bb == nullptr) {
+        return false;
+    }
+    auto func = bb->get_parent();
+    if (func == nullptr) {
+        return false;
+    }
+    return bb == func->get_entry_block();
 }
 
 void ConstPropagation::clear_blocks_recs(BasicBlock *start_bb) {
