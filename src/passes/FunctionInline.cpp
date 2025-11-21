@@ -106,14 +106,13 @@ void FunctionInline::inline_function(Instruction *call, Function *origin) {
         }
     }
     
-    // 步骤2: 处理返回指令并记录映射
+    // 步骤2: 收集返回指令和它们所在的块
+    std::vector<std::pair<Instruction*, BasicBlock*>> ret_info; // (返回指令，所在块)
     for (auto &bb : origin->get_basic_blocks()) {
         for (auto &inst : bb.get_instructions()) {
             if (inst.is_ret()) {
-                auto ret_clone = inst.clone(static_cast<BasicBlock *>(v_map[static_cast<Value *>(&bb)]));
-                ret_list.push_back(ret_clone);
-                v_map.insert(std::make_pair(static_cast<Value *>(&inst),
-                                            static_cast<Value *>(ret_clone)));
+                auto ret_bb = static_cast<BasicBlock *>(v_map[static_cast<Value *>(&bb)]);
+                ret_info.push_back({&inst, ret_bb});
             }
         }
     }
@@ -130,7 +129,21 @@ void FunctionInline::inline_function(Instruction *call, Function *origin) {
         }
     }
     
-    // 步骤4: 创建合并基本块，用于汇聚返回路径
+    // 步骤4: 现在创建返回指令的映射
+    // 对于非void返回，clone返回指令；对于void返回，直接创建新的返回指令
+    for (auto &[ret_inst, ret_bb] : ret_info) {
+        Instruction *ret_clone;
+        if (origin->get_return_type()->is_void_type()) {
+            // void返回：使用create_void_ret创建空返回指令
+            ret_clone = ReturnInst::create_void_ret(ret_bb);
+        } else {
+            // 非void返回：clone返回指令（此时操作数已经被正确映射）
+            ret_clone = ret_inst->clone(ret_bb);
+        }
+        ret_list.push_back(ret_clone);
+    }
+    
+    // 步骤5: 创建合并基本块，用于汇聚返回路径
     Value *ret_val = nullptr;
     BasicBlock *bb_merge = BasicBlock::create(call_func->get_parent(), "", call_func);
     
@@ -164,7 +177,7 @@ void FunctionInline::inline_function(Instruction *call, Function *origin) {
         }
     }
     
-    // 步骤5: 处理调用指令所在的基本块
+    // 步骤6: 处理调用指令所在的基本块
     // 收集call指令之前的所有指令和之后的所有指令
     std::vector<Instruction *> instructions_before_call;
     std::vector<Instruction *> instructions_after_call;
