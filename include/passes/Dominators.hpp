@@ -16,12 +16,18 @@ class Dominators : public Pass {
     void run_on_func(Function *f);
 
     // functions for getting information
-    BasicBlock *get_idom(BasicBlock *bb) { return idom_.at(bb); }
+    BasicBlock *get_idom(BasicBlock *bb) {
+        auto it = idom_.find(bb);
+        if (it == idom_.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
     const BBSet &get_dominance_frontier(BasicBlock *bb) {
-        return dom_frontier_.at(bb);
+        return dom_frontier_[bb];
     }
     const BBSet &get_dom_tree_succ_blocks(BasicBlock *bb) {
-        return dom_tree_succ_blocks_.at(bb);
+        return dom_tree_succ_blocks_[bb];
     }
 
     // print cfg or dominance tree
@@ -62,7 +68,14 @@ class Dominators : public Pass {
         dom_tree_succ_blocks_[bb].insert(dom_tree_succ_bb);
     }
     unsigned int get_post_order(BasicBlock *bb) {
-        return post_order_.at(bb);
+        auto it = post_order_.find(bb);
+        if (it == post_order_.end()) {
+            auto order = post_order_.size();
+            post_order_[bb] = order;
+            post_order_vec_.push_back(bb);
+            return order;
+        }
+        return it->second;
     }
     // for debug
     void print_idom(Function *f);

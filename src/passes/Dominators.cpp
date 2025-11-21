@@ -42,7 +42,15 @@ BasicBlock *Dominators::intersect(BasicBlock *b1, BasicBlock *b2) {
 
 void Dominators::create_reverse_post_order(Function *f) {
     BBSet visited;
+    post_order_vec_.clear();
+    post_order_.clear();
     dfs(f->get_entry_block(), visited);
+    for (auto &bb1 : f->get_basic_blocks()) {
+        auto bb = &bb1;
+        if (visited.find(bb) == visited.end()) {
+            dfs(bb, visited);
+        }
+    }
 }
 
 void Dominators::dfs(BasicBlock *bb, std::set<BasicBlock *> &visited) {

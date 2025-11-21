@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
 
         PassManager PM(m.get());
         // optimization 
-        if(config.dce) {
+        if(config.dce || config.func_inline || config.const_prop) {
             PM.add_pass<Mem2Reg>();
             PM.add_pass<DeadCode>();
         }
@@ -73,8 +73,6 @@ int main(int argc, char **argv) {
         }
 
         if(config.const_prop) {
-            PM.add_pass<Mem2Reg>();
-            PM.add_pass<DeadCode>();
             PM.add_pass<ConstPropagation>();
             PM.add_pass<DeadCode>();
         }
