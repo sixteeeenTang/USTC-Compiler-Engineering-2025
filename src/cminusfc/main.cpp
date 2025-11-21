@@ -133,11 +133,9 @@ void Config::check() {
     if (input_file.extension() != ".cminus") {
         print_err("file format not recognized");
     }
-    if (const_prop && not dce) {
-        print_err("const-prop pass need dce pass");
-    }
-    if (func_inline && not dce) {
-        print_err("function inline pass need dce pass");
+    // 如果启用了const_prop或func_inline，自动启用dce
+    if (const_prop || func_inline) {
+        dce = true;
     }
     if (output_file.empty()) {
         output_file = input_file.stem();
